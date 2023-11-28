@@ -2,15 +2,15 @@ from tracker.centroidtracker import CentroidTracker
 from tracker.trackableobject import TrackableObject
 from imutils.video import VideoStream
 from itertools import zip_longest
-from imutils.video import FPS
 import numpy as np
 import argparse
-import logging
 import imutils
 import time
 import dlib
 import csv
 import cv2
+import requests
+import time
 
 # Parse command line arguments
 def parse_arguments():
@@ -24,8 +24,11 @@ def parse_arguments():
     args = vars(ap.parse_args())
     return args
 
+# Initialize previous_total_count to None
+light = 2
+previous_light=None
 # Function to log the counting data
-def log_data(move_in, in_time, move_out, out_time):
+def log_data(move_in, in_time, move_out, out_time, total_people_inside):
     data = [move_in, in_time, move_out, out_time]
     # Transpose the data to align the columns properly
     export_data = zip_longest(*data, fillvalue='')
@@ -36,14 +39,48 @@ def log_data(move_in, in_time, move_out, out_time):
             wr.writerow(("Move In", "In Time", "Move Out", "Out Time"))
         wr.writerows(export_data)
 
+    global light
+    global previous_light
+    # Assuming total_people_inside is a list with a single element
+    total_count = total_people_inside
+
+    # Check if the total count has changed since the last update
+    if total_count ==0:
+        light=0
+    else:
+        light=2
+    
+    if light != previous_light:
+        light_status_thingspeak(light)
+        # Update previous_total_count
+        previous_light = light
+    
+def light_status_thingspeak(light):
+    url = 'https://api.thingspeak.com/update'
+    api_key = 'FBLPBYDLKQGMJ4G7'  # Replace with your ThingSpeak API Key
+
+    params = {
+        'api_key': api_key,
+        'field1': light
+    }
+
+    response = requests.get(url, params=params)
+
+    # Check the response status
+    if response.status_code == 200:
+        print("Light Status sent to ThingSpeak successfully: ", light)
+        time.sleep(15)
+    else:
+        print("Failed to send total count to ThingSpeak. Status code:", response.status_code)
+
 # Main function for people counting
 def people_counter():
     args = parse_arguments()
-    
+
     CLASSES = ["background", "aeroplane", "bicycle", "bird", "boat",
-        "bottle", "bus", "car", "cat", "chair", "cow", "diningtable",
-        "dog", "horse", "motorbike", "person", "pottedplant", "sheep",
-        "sofa", "train", "tvmonitor"]
+               "bottle", "bus", "car", "cat", "chair", "cow", "diningtable",
+               "dog", "horse", "motorbike", "person", "pottedplant", "sheep",
+               "sofa", "train", "tvmonitor"]
 
     net = cv2.dnn.readNetFromCaffe(args["prototxt"], args["model"])
 
@@ -176,7 +213,8 @@ def people_counter():
             cv2.putText(frame, text, (265, H - ((i * 20) + 60)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
 
         if totalFrames > 0:
-            log_data(move_in, in_time, move_out, out_time)
+            total_people_inside = totalDown - totalUp
+            log_data(move_in, in_time, move_out, out_time, total_people_inside)
 
         cv2.imshow("Real-Time Monitoring/Analysis Window", frame)
         key = cv2.waitKey(1) & 0xFF
